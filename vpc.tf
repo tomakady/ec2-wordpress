@@ -81,7 +81,7 @@ resource "aws_eip" "eip" {
   }
 }
 
-# NAT Gateway (must live in a PUBLIC subnet)
+# NAT Gateway
 resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.eip.id
   subnet_id     = aws_subnet.public1.id
@@ -109,7 +109,7 @@ resource "aws_route_table" "public" {
   }
 }
 
-# Use the VPC's auto-created MAIN route table as the PRIVATE route table
+# Uses the VPC's auto-created MAIN route table as the PRIVATE route table
 resource "aws_default_route_table" "private" {
   default_route_table_id = aws_vpc.this.default_route_table_id
 
