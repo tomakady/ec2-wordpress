@@ -25,8 +25,8 @@ resource "aws_key_pair" "wp" {
 }
 
 # Save the private key to disk securely
-resource "local_file" "wp_private_key" {
-  sensitive_content = tls_private_key.wp.private_key_pem
-  filename          = "${path.module}/wp-key.pem"
-  file_permission   = "0400"
+resource "local_sensitive_file" "wp_private_key" {
+  content         = tls_private_key.wp.private_key_pem
+  filename        = "${path.module}/wp-key.pem"
+  file_permission = "0400"
 }
