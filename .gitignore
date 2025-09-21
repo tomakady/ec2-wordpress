@@ -46,3 +46,6 @@ terraform.rc
 terraform.tfvars
 # keep the dependency lockfile tracked:
 # !.terraform.lock.hcl
+
+wp-key.pem
+# Key pair for AWS instance access
