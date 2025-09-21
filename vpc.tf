@@ -8,18 +8,21 @@ resource "aws_vpc" "this" {
 
 #public subnets
 resource "aws_subnet" "public1" {
-  vpc_id            = aws_vpc.this.id
-  cidr_block        = "10.100.1.0/24"
-  availability_zone = "eu-west-2a"
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = "10.100.1.0/24"
+  availability_zone       = "eu-west-2a"
+  map_public_ip_on_launch = true
 
   tags = {
     Name = "wp-public-1"
   }
 }
+
 resource "aws_subnet" "public2" {
-  vpc_id            = aws_vpc.this.id
-  cidr_block        = "10.100.2.0/24"
-  availability_zone = "eu-west-2b"
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = "10.100.2.0/24"
+  availability_zone       = "eu-west-2b"
+  map_public_ip_on_launch = true
 
   tags = {
     Name = "wp-public-2"
@@ -36,6 +39,7 @@ resource "aws_subnet" "private1" {
     Name = "wp-private-1"
   }
 }
+
 resource "aws_subnet" "private2" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = "10.100.4.0/24"
@@ -46,8 +50,7 @@ resource "aws_subnet" "private2" {
   }
 }
 
-# RDS requires a subnet group with subnets in >= 2 AZs (even for Single-AZ instances),
-# so these should be two distinct subnets like private1 (AZ-a) and private2 (AZ-b).
+# RDS requires a subnet group with subnets in >= 2 AZs (even for Single-AZ instances)
 
 #internet gateway
 resource "aws_internet_gateway" "igw" {
@@ -106,14 +109,17 @@ resource "aws_route_table_association" "public1" {
   subnet_id      = aws_subnet.public1.id
   route_table_id = aws_route_table.public.id
 }
+
 resource "aws_route_table_association" "public2" {
   subnet_id      = aws_subnet.public2.id
   route_table_id = aws_route_table.public.id
 }
+
 resource "aws_route_table_association" "private1" {
   subnet_id      = aws_subnet.private1.id
   route_table_id = aws_route_table.private.id
 }
+
 resource "aws_route_table_association" "private2" {
   subnet_id      = aws_subnet.private2.id
   route_table_id = aws_route_table.private.id
@@ -122,7 +128,7 @@ resource "aws_route_table_association" "private2" {
 #security group
 resource "aws_security_group" "allow_ssh" {
   name        = "allow_ssh"
-  description = "Allow SSH inbound traffic"
+  description = "Allow SSH and HTTP inbound traffic"
   vpc_id      = aws_vpc.this.id
 
   ingress {

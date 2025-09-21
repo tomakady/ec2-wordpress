@@ -3,7 +3,8 @@ resource "aws_db_subnet_group" "rds_subnet_group" {
   name       = "rds-subnet-group"
   subnet_ids = [aws_subnet.private1.id, aws_subnet.private2.id]
 }
-#RDS INSTANCE
+
+# RDS INSTANCE
 resource "aws_db_instance" "rds_instance" {
   engine                    = "mysql"
   engine_version            = "5.7"
@@ -22,6 +23,7 @@ resource "aws_db_instance" "rds_instance" {
     Name = "RDS Instance"
   }
 }
+
 # RDS security group
 resource "aws_security_group" "rds_security_group" {
   name        = "rds-security-group"
@@ -39,4 +41,3 @@ resource "aws_security_group" "rds_security_group" {
     Name = "RDS Security Group"
   }
 }
-
