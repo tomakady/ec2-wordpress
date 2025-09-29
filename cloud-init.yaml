@@ -1,0 +1,126 @@
+#cloud-config
+package_update: true
+
+write_files:
+  - path: /usr/local/bin/wp-bootstrap.sh
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      set -x
+
+      REGION="${region}"
+      RDS_ENDPOINT="${rds_endpoint}"
+      SECRET_NAME="${db_secret_name}"
+      COMPOSE_ARCH="${compose_arch}"
+
+      # Install Docker dependencies (Amazon Linux 2023 friendly)
+      if ! dnf install -y docker awscli jq curl; then
+        yum install -y docker awscli jq curl
+      fi
+      systemctl enable --now docker
+      usermod -aG docker ec2-user 2>/dev/null || usermod -aG docker ec2-user || true
+
+      # Give the daemon a moment to become ready
+      until systemctl is-active --quiet docker; do sleep 2; done
+
+      # Install Docker Compose plugin manually with retries
+      mkdir -p /usr/libexec/docker/cli-plugins
+      for attempt in $(seq 1 5); do
+        if curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \
+          "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$${COMPOSE_ARCH}"; then
+          break
+        fi
+        sleep 5
+        if [[ $${attempt} -eq 5 ]]; then
+          echo "Failed to download docker compose after $${attempt} attempts" >&2
+          exit 1
+        fi
+      done
+      chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+      docker compose version
+
+      # Fetch DB creds from Secrets Manager
+      SECRET_JSON=$(aws secretsmanager get-secret-value \
+        --secret-id "$${SECRET_NAME}" \
+        --region "$${REGION}" \
+        --query SecretString --output text)
+      DB_USER=$(echo "$SECRET_JSON" | jq -r .username)
+      DB_PASS=$(echo "$SECRET_JSON" | jq -r .password)
+
+      # Render .env (defer runtime expansions with $${...})
+      META_ENDPOINT="http://169.254.169.254/latest"
+      TOKEN=$(curl -s -X PUT "$${META_ENDPOINT}/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)
+      if [[ -n "$${TOKEN}" ]]; then
+        PUB_HOST=$(curl -s -H "X-aws-ec2-metadata-token: $${TOKEN}" "$${META_ENDPOINT}/meta-data/public-hostname" || true)
+        if [[ -z "$${PUB_HOST}" ]]; then
+          PUB_HOST=$(curl -s -H "X-aws-ec2-metadata-token: $${TOKEN}" "$${META_ENDPOINT}/meta-data/public-ipv4" || echo "localhost")
+        fi
+      else
+        PUB_HOST=$(curl -s "$${META_ENDPOINT}/meta-data/public-hostname" || true)
+        if [[ -z "$${PUB_HOST}" ]]; then
+          PUB_HOST=$(curl -s "$${META_ENDPOINT}/meta-data/public-ipv4" || echo "localhost")
+        fi
+      fi
+      cat >/home/ec2-user/.env <<EOF
+      WORDPRESS_DB_HOST=$${RDS_ENDPOINT}:3306
+      WORDPRESS_DB_USER=$${DB_USER}
+      WORDPRESS_DB_PASSWORD=$${DB_PASS}
+      WORDPRESS_DB_NAME=${db_name}
+
+      WP_SITE_TITLE="${wp_site_title}"
+      WP_ADMIN_USER="${wp_admin_user}"
+      WP_ADMIN_PASSWORD="${wp_admin_password}"
+      WP_ADMIN_EMAIL="${wp_admin_email}"
+      WP_SITE_URL=http://$${PUB_HOST}
+      EOF
+      chown ec2-user:ec2-user /home/ec2-user/.env
+      chmod 600 /home/ec2-user/.env
+
+      # docker-compose.yml
+      cat >/home/ec2-user/docker-compose.yml <<'COMPOSE'
+      version: "3.8"
+      services:
+        wordpress:
+          image: wordpress:latest
+          container_name: wordpress
+          ports:
+            - "80:80"
+          env_file: /home/ec2-user/.env
+          volumes:
+            - wordpress_data:/var/www/html
+          restart: unless-stopped
+          healthcheck:
+            test: ["CMD-SHELL", "curl -fsS http://localhost/ || exit 1"]
+            interval: 30s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
+      volumes:
+        wordpress_data:
+      COMPOSE
+      chown ec2-user:ec2-user /home/ec2-user/docker-compose.yml
+
+      # Bring WordPress up (retry to handle transient failures)
+      COMPOSE_CMD=(docker compose -f /home/ec2-user/docker-compose.yml --project-directory /home/ec2-user up -d)
+      for attempt in $(seq 1 5); do
+        if "$${COMPOSE_CMD[@]}"; then
+          break
+        fi
+        sleep 10
+        if [[ $${attempt} -eq 5 ]]; then
+          echo "Docker compose failed after $${attempt} attempts" >&2
+          exit 1
+        fi
+      done
+
+      docker compose -f /home/ec2-user/docker-compose.yml --project-directory /home/ec2-user ps
+      docker compose -f /home/ec2-user/docker-compose.yml --project-directory /home/ec2-user logs --tail 50 || true
+
+runcmd:
+  - [
+      bash,
+      -c,
+      "/usr/local/bin/wp-bootstrap.sh > /var/log/wp-bootstrap.log 2>&1",
+    ]
