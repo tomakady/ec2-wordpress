@@ -9,15 +9,15 @@ resource "aws_instance" "wordpress" {
   associate_public_ip_address = true
   tags                        = { Name = var.ec2_name }
 
-  user_data = templatefile("${path.module}/cloud-init.yaml", {
+  user_data = templatefile("${path.module}/bootstrap.sh", {
     region            = var.region
     rds_endpoint      = aws_db_instance.rds_instance.address
     db_name           = var.db_name
+    db_secret_name    = var.db_secret_name
     wp_site_title     = var.wp_site_title
     wp_admin_user     = var.wp_admin_user
     wp_admin_password = var.wp_admin_password
     wp_admin_email    = var.wp_admin_email
-    db_secret_name    = var.db_secret_name
   })
   user_data_replace_on_change = true
 

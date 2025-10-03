@@ -1,0 +1,72 @@
+#!/bin/bash
+exec > /var/log/bootstrap.log 2>&1
+set -x
+
+# Install Docker
+dnf -y install docker awscli jq
+systemctl enable --now docker
+usermod -aG docker ec2-user
+
+# Install Docker Compose
+mkdir -p /usr/libexec/docker/cli-plugins
+curl -fL -o /usr/libexec/docker/cli-plugins/docker-compose \
+  "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64"
+chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+
+# Get instance metadata
+PUB_HOST=$(curl -s http://169.254.169.254/latest/meta-data/public-hostname || echo "")
+PUB_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 || echo "")
+if [ -n "$PUB_HOST" ]; then
+  SITE_URL="http://$PUB_HOST"
+elif [ -n "$PUB_IP" ]; then
+  SITE_URL="http://$PUB_IP"
+else
+  SITE_URL="http://localhost"
+fi
+
+# Get DB credentials from Secrets Manager
+SECRET_JSON=$(aws secretsmanager get-secret-value \
+  --secret-id "${db_secret_name}" \
+  --region "${region}" \
+  --query SecretString --output text)
+DB_USER=$(echo "$SECRET_JSON" | jq -r .username)
+DB_PASS=$(echo "$SECRET_JSON" | jq -r .password)
+
+# Test RDS connectivity
+for i in {1..30}; do
+  if timeout 5 bash -c "echo > /dev/tcp/${rds_endpoint}/3306" 2>/dev/null; then
+    echo "RDS is reachable"
+    break
+  fi
+  echo "Waiting for RDS... attempt $i"
+  sleep 10
+done
+
+# Create docker-compose.yml
+cat > /home/ec2-user/docker-compose.yml <<EOF
+version: "3.8"
+services:
+  wordpress:
+    image: wordpress:6.5-php8.2-apache
+    ports: ["80:80"]
+    environment:
+      WORDPRESS_DB_HOST: "${rds_endpoint}:3306"
+      WORDPRESS_DB_USER: "$DB_USER"
+      WORDPRESS_DB_PASSWORD: "$DB_PASS"
+      WORDPRESS_DB_NAME: "${db_name}"
+    volumes:
+      - wp_content:/var/www/html/wp-content
+    restart: unless-stopped
+volumes:
+  wp_content:
+EOF
+
+chown ec2-user:ec2-user /home/ec2-user/docker-compose.yml
+
+# Start WordPress
+docker compose -f /home/ec2-user/docker-compose.yml up -d
+
+echo "================================================"
+echo "WordPress is starting!"
+echo "URL: $SITE_URL"
+echo "================================================"
