@@ -34,3 +34,6 @@ docs/notes.md
 
 # AWS credentials
 aws-script.sh
+
+# Lock file
+.terraform.lock.hcl
