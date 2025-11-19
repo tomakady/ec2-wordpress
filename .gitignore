@@ -37,3 +37,6 @@ aws-script.sh
 
 # Lock file
 .terraform.lock.hcl
+*.lock.hcl
+*.*.hcl
+*.hcl
